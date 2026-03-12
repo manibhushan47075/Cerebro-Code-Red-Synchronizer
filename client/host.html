@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CEREBRO — Broadcaster Control</title>
+  <meta name="description" content="Broadcaster control panel for Cerebro Code Red Synchronizer." />
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .host-grid {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 16px;
+      flex: 1;
+    }
+    .left-col { display: flex; flex-direction: column; gap: 16px; }
+    .right-col { display: flex; flex-direction: column; gap: 16px; }
+    .control-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .room-code-display {
+      font-family: var(--font-retro);
+      font-size: 0.75rem;
+      color: var(--neon-red);
+      letter-spacing: 0.2em;
+      border: 2px solid var(--neon-red);
+      padding: 8px 16px;
+      border-radius: 2px;
+      text-shadow: 0 0 10px rgba(255,0,60,0.7);
+      animation: pulseRedGlow 2s infinite;
+    }
+    .listener-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--crt-green);
+      box-shadow: 0 0 6px var(--crt-green);
+      margin-right: 6px;
+    }
+    @media(max-width:900px){ .host-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div class="toast-container" id="toastContainer"></div>
+
+<div class="page-wrapper">
+  <!-- Top Bar -->
+  <div class="top-bar">
+    <div class="logo-area">
+      <div class="logo-title">📡 CEREBRO — BROADCASTER CONTROL</div>
+      <div class="logo-sub">HAWKINS LAB / SIGNAL TRANSMISSION ACTIVE</div>
+    </div>
+    <div class="status-row">
+      <div class="room-code-display" id="roomCodeDisplay">ROOM: —</div>
+      <div><span class="status-dot red" id="broadcastDot"></span>&nbsp;<span class="status-label" style="color:var(--neon-red);" id="broadcastLabel">CONNECTING…</span></div>
+      <div><span class="status-dot" id="connDot"></span>&nbsp;<span class="status-label" id="connLabel">SIGNAL INIT</span></div>
+    </div>
+  </div>
+
+  <div class="host-grid">
+    <!-- LEFT COLUMN -->
+    <div class="left-col">
+
+      <!-- Video Player Panel -->
+      <div class="panel">
+        <div class="panel-title red">📡 TRANSMISSION FEED — BROADCASTER VIEW</div>
+        <div class="video-wrapper" id="videoWrapper">
+          <div class="video-overlay-label" id="videoOverlayLabel">● REC LIVE BROADCAST</div>
+          <div class="no-video-placeholder" id="noVideoPlaceholder">
+            <div class="no-video-icon">📼</div>
+            <div>NO SIGNAL — LOAD VIDEO TO BEGIN BROADCAST</div>
+            <div style="font-size:0.85rem;color:var(--text-dim);">Click "LOAD VIDEO FILE" below</div>
+          </div>
+          <video id="mainVideo" class="main-video" style="display:none;" preload="metadata"></video>
+        </div>
+
+        <!-- Controls -->
+        <div class="control-row" style="margin-top:12px;">
+          <div class="btn file-input-wrap">
+            📼 LOAD VIDEO FILE
+            <input type="file" id="fileInput" accept="video/*" onchange="loadVideoFile(event)" />
+          </div>
+          <button class="btn green" id="playBtn" onclick="broadcastPlay()" disabled>▶ PLAY</button>
+          <button class="btn red"  id="pauseBtn" onclick="broadcastPause()" disabled>⏸ PAUSE</button>
+          <button class="btn"      id="syncNowBtn" onclick="forceSyncNow()" disabled>⟳ FORCE SYNC</button>
+        </div>
+      </div>
+
+      <!-- Debug Log Panel -->
+      <div class="panel">
+        <div class="panel-title">🛸 SIGNAL EVENT LOG — WebSocket Debug</div>
+        <div class="debug-log" id="debugLog">
+          <div class="log-line"><span class="ts">[BOOT] </span><span class="ev">CEREBRO SYSTEMS INITIALIZING...</span></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div class="right-col">
+
+      <!-- Radar -->
+      <div class="panel">
+        <div class="panel-title">🔭 SIGNAL RADAR</div>
+        <div class="radar-container">
+          <svg class="radar-svg" viewBox="0 0 180 180">
+            <circle cx="90" cy="90" r="85" fill="none" stroke="#00d4ff" stroke-width="1.5" opacity="0.6"/>
+            <circle cx="90" cy="90" r="60" fill="none" stroke="#00d4ff" stroke-width="0.8" opacity="0.4"/>
+            <circle cx="90" cy="90" r="35" fill="none" stroke="#00d4ff" stroke-width="0.8" opacity="0.3"/>
+            <circle cx="90" cy="90" r="10" fill="#ff003c" opacity="0.9"/>
+            <line x1="90" y1="5" x2="90" y2="175" stroke="#00d4ff" stroke-width="0.5" opacity="0.3"/>
+            <line x1="5" y1="90" x2="175" y2="90" stroke="#00d4ff" stroke-width="0.5" opacity="0.3"/>
+            <g class="radar-sweep-line">
+              <line x1="90" y1="90" x2="90" y2="6" stroke="#00d4ff" stroke-width="2.5" opacity="0.9"/>
+            </g>
+            <circle class="radar-ping" cx="90" cy="90" r="5" fill="none" stroke="#ff003c" stroke-width="1.5"/>
+            <!-- Listener dots populated by JS -->
+            <g id="radarDots"></g>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Connection Dashboard -->
+      <div class="panel">
+        <div class="panel-title">⚡ CONNECTION DASHBOARD</div>
+        <div class="stat-row">
+          <span class="stat-key">CONNECTED AGENTS</span>
+          <span class="stat-val green" id="agentCount">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-key">SYNC STATUS</span>
+          <span class="stat-val green" id="syncStatus">STABLE</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-key">BROADCAST SIGNAL</span>
+          <span class="stat-val red blink" id="broadcastSignal">STANDBY</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-key">LATENCY</span>
+          <span class="stat-val" id="latencyVal">-- ms</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-key">ROOM CODE</span>
+          <span class="stat-val red" id="roomCodeStat">—</span>
+        </div>
+      </div>
+
+      <!-- Sync Health Meter -->
+      <div class="panel">
+        <div class="panel-title green">📶 SYNCHRONIZATION HEALTH</div>
+        <div class="stat-row">
+          <span class="stat-key">SIGNAL QUALITY</span>
+          <span class="stat-val green" id="healthPct">100%</span>
+        </div>
+        <div class="health-bar-wrap" style="margin:8px 0;">
+          <div class="health-bar-fill" id="healthBar" style="width:100%;"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
+          <div class="signal-bars">
+            <div class="signal-bar"></div>
+            <div class="signal-bar"></div>
+            <div class="signal-bar"></div>
+            <div class="signal-bar"></div>
+            <div class="signal-bar"></div>
+          </div>
+          <span class="status-label" id="signalQualLabel">STRONG SIGNAL</span>
+        </div>
+      </div>
+
+      <!-- Connected Agents List -->
+      <div class="panel">
+        <div class="panel-title">👥 UPSIDE DOWN CONNECTION</div>
+        <div class="agents-list" id="agentsList">
+          <div class="agent-row" style="color:var(--text-dim);">No listeners connected</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+// ─── Parse room from URL ────────────────────────────────────
+const params = new URLSearchParams(window.location.search);
+const ROOM_CODE = (params.get('room') || 'HAWKINS1986').toUpperCase();
+
+document.getElementById('roomCodeDisplay').textContent = `ROOM: ${ROOM_CODE}`;
+document.getElementById('roomCodeStat').textContent = ROOM_CODE;
+
+// ─── Toast helper ────────────────────────────────────────────
+function showToast(msg, type = 'info') {
+  const c = document.getElementById('toastContainer');
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+// ─── Debug log helper ────────────────────────────────────────
+function log(ev, detail = '', ts = true) {
+  const box = document.getElementById('debugLog');
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  const now = new Date().toLocaleTimeString();
+  line.innerHTML = `${ts ? `<span class="ts">[${now}] </span>` : ''}<span class="ev">${ev}</span>${detail ? ` <span class="val">${detail}</span>` : ''}`;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+// ─── Socket.io ────────────────────────────────────────────────
+const socket = io();
+let latency = 0;
+let videoReady = false;
+
+socket.on('connect', () => {
+  log('SOCKET CONNECTED', socket.id);
+  updateConn(true);
+  socket.emit('create-room', { roomCode: ROOM_CODE });
+  startLatencyPing();
+});
+
+socket.on('disconnect', () => {
+  log('SOCKET DISCONNECTED', '', true);
+  updateConn(false);
+});
+
+socket.on('room-joined', ({ roomCode, info }) => {
+  log('ROOM CREATED', roomCode);
+  document.getElementById('broadcastLabel').textContent = 'BROADCAST ACTIVE';
+  document.getElementById('broadcastSignal').textContent = 'ACTIVE';
+  document.getElementById('broadcastSignal').classList.remove('blink');
+  document.getElementById('broadcastSignal').style.color = 'var(--crt-green)';
+  showToast(`Room ${roomCode} created!`, 'success');
+  updateRoomStatus(info);
+});
+
+socket.on('room-status', (info) => updateRoomStatus(info));
+
+socket.on('error-msg', ({ message }) => {
+  showToast(message, 'error');
+  log('ERROR', message);
+});
+
+socket.on('sync-request-from-listener', ({ listenerId }) => {
+  const vid = document.getElementById('mainVideo');
+  socket.emit('sync-response', {
+    listenerId,
+    currentTime: vid.currentTime,
+    playing: !vid.paused,
+  });
+});
+
+// ─── Latency Ping ──────────────────────────────────────────────
+function startLatencyPing() {
+  setInterval(() => {
+    const t = Date.now();
+    socket.emit('ping-latency', { t });
+  }, 3000);
+}
+
+socket.on('pong-latency', ({ t }) => {
+  latency = Date.now() - t;
+  document.getElementById('latencyVal').textContent = `${latency} ms`;
+  updateHealth();
+});
+
+// ─── Room Status Update ────────────────────────────────────────
+function updateRoomStatus(info) {
+  const count = info.listenerCount || 0;
+  document.getElementById('agentCount').textContent = count;
+  updateRadarDots(count);
+  updateAgentList(count);
+  updateHealth();
+}
+
+function updateConn(ok) {
+  document.getElementById('connDot').style.background = ok ? 'var(--crt-green)' : 'var(--neon-red)';
+  document.getElementById('connLabel').textContent = ok ? 'SIGNAL ACTIVE' : 'SIGNAL LOST';
+}
+
+function updateHealth() {
+  const lat = latency;
+  let health = 100;
+  if (lat > 300) health = 70;
+  if (lat > 600) health = 40;
+  if (lat > 1000) health = 15;
+  document.getElementById('healthBar').style.width = health + '%';
+  document.getElementById('healthPct').textContent = health + '%';
+  const lbl = health > 80 ? 'STRONG SIGNAL' : health > 50 ? 'MODERATE SIGNAL' : 'WEAK SIGNAL';
+  document.getElementById('signalQualLabel').textContent = lbl;
+  document.getElementById('syncStatus').textContent = health > 70 ? 'STABLE' : 'DEGRADED';
+  document.getElementById('syncStatus').style.color = health > 70 ? 'var(--crt-green)' : 'var(--neon-red)';
+}
+
+// ─── Radar Dots for Listeners ──────────────────────────────────
+function updateRadarDots(count) {
+  const g = document.getElementById('radarDots');
+  g.innerHTML = '';
+  for (let i = 0; i < count; i++) {
+    const angle = (i / Math.max(count, 1)) * 2 * Math.PI;
+    const r = 45 + Math.random() * 30;
+    const x = 90 + r * Math.cos(angle);
+    const y = 90 + r * Math.sin(angle);
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('cx', x.toFixed(1));
+    dot.setAttribute('cy', y.toFixed(1));
+    dot.setAttribute('r', '4');
+    dot.setAttribute('fill', '#39ff14');
+    dot.setAttribute('opacity', '0.9');
+    dot.style.filter = 'drop-shadow(0 0 4px #39ff14)';
+    g.appendChild(dot);
+  }
+}
+
+function updateAgentList(count) {
+  const list = document.getElementById('agentsList');
+  if (count === 0) {
+    list.innerHTML = '<div class="agent-row" style="color:var(--text-dim);">No listeners connected</div>';
+    return;
+  }
+  list.innerHTML = '';
+  for (let i = 1; i <= count; i++) {
+    const row = document.createElement('div');
+    row.className = 'agent-row';
+    row.innerHTML = `<span class="listener-dot"></span>AGENT-${String(i).padStart(3,'0')} <span class="badge green" style="margin-left:auto;font-size:0.75rem;">SYNCED</span>`;
+    list.appendChild(row);
+  }
+}
+
+// ─── Video File Load ───────────────────────────────────────────
+function loadVideoFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const url = URL.createObjectURL(file);
+  const vid = document.getElementById('mainVideo');
+  vid.src = url;
+  vid.style.display = 'block';
+  document.getElementById('noVideoPlaceholder').style.display = 'none';
+  document.getElementById('videoOverlayLabel').textContent = '● REC  ' + file.name;
+  videoReady = true;
+
+  document.getElementById('playBtn').disabled = false;
+  document.getElementById('pauseBtn').disabled = false;
+  document.getElementById('syncNowBtn').disabled = false;
+
+  socket.emit('video-src', { roomCode: ROOM_CODE, src: file.name });
+  log('VIDEO LOADED', file.name);
+  showToast('Video loaded! Press PLAY to broadcast.', 'success');
+}
+
+// ─── Video Event Emitters ──────────────────────────────────────
+function broadcastPlay() {
+  const vid = document.getElementById('mainVideo');
+  if (!vid.src) { showToast('Load a video first!', 'error'); return; }
+  vid.play();
+}
+
+function broadcastPause() {
+  const vid = document.getElementById('mainVideo');
+  vid.pause();
+}
+
+function forceSyncNow() {
+  const vid = document.getElementById('mainVideo');
+  socket.emit('sync-broadcast', {
+    roomCode: ROOM_CODE,
+    currentTime: vid.currentTime,
+    playing: !vid.paused,
+  });
+  log('FORCE SYNC', `t=${vid.currentTime.toFixed(2)}s`);
+  showToast('Force sync signal sent!', 'success');
+}
+
+// ─── Attach video events ───────────────────────────────────────
+const vid = document.getElementById('mainVideo');
+
+vid.addEventListener('play', () => {
+  socket.emit('play', { roomCode: ROOM_CODE, currentTime: vid.currentTime });
+  log('EMIT:PLAY', `t=${vid.currentTime.toFixed(2)}s`);
+  document.getElementById('broadcastSignal').textContent = '▶ BROADCASTING';
+  document.getElementById('broadcastSignal').style.color = 'var(--crt-green)';
+});
+
+vid.addEventListener('pause', () => {
+  socket.emit('pause', { roomCode: ROOM_CODE, currentTime: vid.currentTime });
+  log('EMIT:PAUSE', `t=${vid.currentTime.toFixed(2)}s`);
+  document.getElementById('broadcastSignal').textContent = '⏸ PAUSED';
+  document.getElementById('broadcastSignal').style.color = 'var(--neon-orange)';
+});
+
+vid.addEventListener('seeked', () => {
+  socket.emit('seek', { roomCode: ROOM_CODE, currentTime: vid.currentTime });
+  log('EMIT:SEEK', `→ ${vid.currentTime.toFixed(2)}s`);
+  socket.emit('sync-broadcast', { roomCode: ROOM_CODE, currentTime: vid.currentTime, playing: !vid.paused });
+});
+
+// ─── Periodic sync every 5 seconds ────────────────────────────
+setInterval(() => {
+  if (!vid.src || vid.paused) return;
+  socket.emit('sync-broadcast', {
+    roomCode: ROOM_CODE,
+    currentTime: vid.currentTime,
+    playing: !vid.paused,
+  });
+}, 5000);
+</script>
+</body>
+</html>
